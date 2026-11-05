@@ -2,6 +2,7 @@ using System;
 using OniMoono.Assets.TypeTrees;
 using OniMoono.Engine.Rendering;
 using UnityEngine;
+using UnityEngine.Rendering;
 using N = Brutal.OpenGlApi.OpenGl.Native;
 using static OniMoono.Desktop.Gl.GlConst;
 
@@ -89,6 +90,8 @@ namespace OniMoono.Desktop.Gl
     /// A pass's fixed-function state with its property references resolved.
     internal struct ResolvedState : IEquatable<ResolvedState>
     {
+        static readonly int GuiZTestMode = ShaderPropertyIds.Get("unity_GUIZTestMode");
+
         public int Src, Dst, SrcA, DstA, Op, OpA, Mask, ZTest, ZWrite, Cull, AlphaToMask;
         public float OffsetFactor, OffsetUnits;
         public int StencilRef, ReadMask, WriteMask, FComp, FPass, FFail, FZFail, BComp, BPass, BFail, BZFail;
@@ -109,6 +112,18 @@ namespace OniMoono.Desktop.Gl
         /// objects, replaced at once, and threads that resolve the same one store equal values.
         public static ResolvedState Of(PassState s, DrawInputs d, MaterialValues values)
         {
+            // The colony charts use a legacy line shader with a fixed LEqual depth test.
+            // Honor the overlay canvas's Always mode for this draw before consulting the cache:
+            // the same shader also draws world geometry with its original depth test.
+            if (s.ZTest.PropertyId == 0 && s.ZTest.Constant == (float)CompareFunction.LessEqual
+                && d.Block != null && d.Block.Floats.TryGetValue(GuiZTestMode, out float mode) && mode == (float)CompareFunction.Always
+                && d.Shader?.ShaderName == "Lines/Colored Blended")
+            {
+                var state = Resolve(s, d);
+                state.ZTest = (int)CompareFunction.Always;
+                return state;
+            }
+
             if (s.PropertyIds.Length == 0)
             {
                 var constant = System.Threading.Volatile.Read(ref s.Constant);
